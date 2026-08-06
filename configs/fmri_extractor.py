@@ -31,3 +31,10 @@ FMRI_EXTRACTOR_CONFIG = {
         version="2",
     ),
 }
+
+fMRIConfig = {
+        "preproc": "fmriprep",
+        "resolution": "2.0mm",
+        "registration": "msmall",
+        "freq": 0.05,
+    }
