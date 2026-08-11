@@ -3,8 +3,7 @@ from preprocess.load_graph import _fmri_extractor,_fmri_extractor_metadata
 import torch
 import os
 from configs.fmri_extractor import fMRIConfig
-
-DATA_DIR=r"E:\ReBrainFormer\ReBrainFormer\test_data"
+DATA_DIR = "/home/snottyunhunter/ReBrainFormer/test_data/ABIDE_pcp/cpac/nofilt_noglobal"
 
 
 def _prepare_raw_data(TARGET_DIR:str)->list[str]:
@@ -13,7 +12,7 @@ def _prepare_raw_data(TARGET_DIR:str)->list[str]:
         os.mkdir(TARGET_DIR)
     npyList=[]
     for file in os.listdir(DATA_DIR):
-        if file.endswith('.npy'):
+        if not (file.endswith('.nii') or file.endswith('.nii.gz')):
             continue
         filepath=os.path.join(DATA_DIR,file)
         try:
@@ -38,7 +37,7 @@ def _prepare_raw_data(TARGET_DIR:str)->list[str]:
             print(f"Error Log:{e}| Skipping file {filepath}")
     return npyList
 if __name__=='__main__':
-    TARGET_DIR=r"E:\ReBrainFormer\ReBrainFormer\test_data_npy"
+    TARGET_DIR = "test_data_npy"
     a=_prepare_raw_data(TARGET_DIR)
     print(a)
 
