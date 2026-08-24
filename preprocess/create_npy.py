@@ -21,10 +21,8 @@ def _prepare_raw_data(TARGET_DIR:str)->list[str]:
                     filepath,
                     fMRIConfig,
                 )
-            
             if event is None:
                 raise RuntimeError("Failed to create Fmri event.")
-        
             fmri = _fmri_extractor(event)
             npy_timeseries=fmri.numpy()
             print(npy_timeseries)
@@ -40,5 +38,4 @@ def _prepare_raw_data(TARGET_DIR:str)->list[str]:
 if __name__=='__main__':
     TARGET_DIR=r"E:\ReBrainFormer\ReBrainFormer\test_data_npy"
     a=_prepare_raw_data(TARGET_DIR)
-    print(a)
 
