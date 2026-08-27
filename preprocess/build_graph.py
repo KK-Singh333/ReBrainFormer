@@ -2,6 +2,7 @@ import networkx as nx
 import numpy as np
 import os
 import math
+import pickle
 
 def build_graph(file_path):
     
@@ -54,5 +55,7 @@ def drop_fraction_of_neighbors(G, a=2.0, weight_attr='weight'):
 if __name__=='__main__':
     graph=build_graph("/home/snottyunhunter/ReBrainFormer/test_data_npy/Pitt_0050003_func_preproc.nii.npy")
     graph=drop_fraction_of_neighbors(graph)
+    with open("graph.gpickle", "wb") as f:
+        pickle.dump(graph, f)
 
     print(graph)
