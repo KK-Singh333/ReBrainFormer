@@ -7,6 +7,8 @@ def createLouvainCommunity(G, community_size):
     '''Creates communities based on Louvain Algo, return list of sets'''
     communities=nx.community.louvain_communities(G, seed=123, resolution=community_size)
     return communities
+
+
 def normaliseTimeSeries(communities, fmriTimeseries):
     '''Create a tensor of normalised timeseries per community'''
     community_tensor=[]
@@ -20,6 +22,7 @@ def normaliseTimeSeries(communities, fmriTimeseries):
         node_idx_list.append(node_idx_list)
     normalised_communities= torch.stack(community_tensor)
     return normalised_communities,node_idx_list
+
 def mesoEmbed(normTimeSeries, communities):
     node_map = {}
     for community_idx, community in enumerate(normTimeSeries):

@@ -1,6 +1,6 @@
 import torch
 
-
+import torch.nn as nn
 
 class ReBrainFormer(nn.Module):
     def __init__(self, args):
