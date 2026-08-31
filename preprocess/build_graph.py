@@ -16,6 +16,9 @@ def build_graph(file_path):
     np.fill_diagonal(corr, 0) # removing the self loops
 
     G = nx.from_numpy_array(corr)
+    
+    for node in G.nodes:
+        G.nodes[node]["feature"] = corr[node]
 
     return G
 

@@ -1,68 +1,51 @@
-import os
-from GraphRicciCurvature import OllivierRicci as oc
 import pickle
 import networkx as nx
 import numpy as np
-import stat
-import torch
+from GraphRicciCurvature import OllivierRicci as oc
+
 
 def computing_curvature(graph):
-        a=oc._compute_ricci_curvature_edges(graph,weight="weight",edge_list=graph.edges())
-        return a
+    return oc._compute_ricci_curvature_edges(graph, weight="weight", edge_list=graph.edges())
 
-def addin_attr(graph,curv_dict):
-        nx.set_edge_attributes(graph,curv_dict,"RicciCurvature")
-        return graph
+
+def addin_attr(graph, curv_dict):
+    nx.set_edge_attributes(graph, curv_dict, "RicciCurvature")
+    return graph
+
 
 def feature_vec(graph):
-    nodes=list(graph.nodes())
-    node_idx={
-        n: i for i,n in enumerate(nodes)
-      }
-
-    feats=np.zeros((len(nodes),5))
+    """cv = [mean_c, min_c, var_c, frac_neg, mrw] per eq. 5 -> feeds MLP(cv) in eq. 6"""
+    nodes = list(graph.nodes())
+    node_idx = {n: i for i, n in enumerate(nodes)}
+    feats = np.zeros((len(nodes), 5))
 
     for n in nodes:
-            
-        i=node_idx[n]
-        incident=[graph[i][nbr]["RicciCurvature"] for nbr in graph.neighbors(n) ]
+        i = node_idx[n]
+        neighbors = list(graph.neighbors(n))
+        if len(neighbors) == 0:
+            feats[i] = [0.0, 0.0, 0.0, 0.0, 0.0]
+            continue
 
-        mean_c=incident.mean()
-        min_c=incident.min()
-        max_c=incident.max()
-        std_c=incident.std()
-        frac_neg=(incident<0).mean()
-        feats[i] = [mean_c, min_c, max_c, std_c, frac_neg]
-    
+        incident = np.array([graph[n][nbr]["RicciCurvature"] for nbr in neighbors])
+        mean_c = incident.mean()
+        min_c = incident.min()
+        var_c = incident.var()
+        frac_neg = (incident < 0).mean()
+
+        weights = np.array([graph[n][nbr].get("weight", 1.0) for nbr in neighbors])
+        w_sum = weights.sum()
+        mrw = (weights * incident).sum() / w_sum if w_sum > 0 else 0.0
+
+        feats[i] = [mean_c, min_c, var_c, frac_neg, mrw]
+
     return feats
-    
 
 
 
-class CurvatureMLP(torch.nn.Module):
-    
-    def __init__(self, in_dim=5, hidden_dim=32, out_dim=64):
-        super().__init__()
-        self.net = torch.nn.Sequential(
-            torch.nn.Linear(in_dim, hidden_dim),
-            torch.nn.ReLU(),
-            torch.nn.Linear(hidden_dim, out_dim),
-        )
-
-    def forward(self, x):
-        return self.net(x)
-
-
-                 
-    
-if __name__=='__main__':
+if __name__ == "__main__":
     with open("graph.gpickle", "rb") as f:
         graph = pickle.load(f)
 
-    curv_dict=computing_curvature(graph)
-    graph=addin_attr(graph,curv_dict)
-    feat=feature_vec(graph)
-    mlp=CurvatureMLP()
-    node_embed=mlp(feat)
-    
-
+    curv_dict = computing_curvature(graph)
+    graph = addin_attr(graph, curv_dict)
+    cv = feature_vec(graph)             # (N,5) -> CurvatureMLP -> e_curv_v, additive into h^(0)

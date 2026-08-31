@@ -20,8 +20,8 @@ class GlobalEncoding():
         edge_index,edge_att=utils.get_laplacian(graph.edge_index,edge_att,normalization=self.normalisation,num_nodes=graph.num_nodes)
         L=utils.to_scipy_sparse_matrix(edge_index,edge_att)
         EigVal,EigVec=np.linalg.eig(L.toarray())
-        idx=EigVal.argsort()
-        exp_eigenvalues = np.exp(-gamma * EigVal[idx]) # sorts the eigen value 
+       
+        exp_eigenvalues = np.exp(-gamma * EigVal) # sorts the eigen value 
 
         p =  np.diag(exp_eigenvalues) /np.sum(exp_eigenvalues)
 
