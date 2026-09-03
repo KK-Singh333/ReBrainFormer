@@ -61,7 +61,7 @@ class GlobalEncoding():
 
             per_node_embed_diff[node] = perturbed_embed - original_embed
 
-        return node_scores, per_node_embed_diff
+        return np.trace(per_node_embed_diff), per_node_embed_diff
 
 
   
