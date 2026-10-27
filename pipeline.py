@@ -3,6 +3,7 @@ from modules import meso,local_enc,global_encoding
 import os
 import pickle
 import torch_geometric.utils as utils
+import numpy as np
 
 DATA_DIR = "/home/snottyunhunter/ReBrainFormer/test_data/ABIDE_pcp/cpac/nofilt_noglobal"
 TARGET_DIR ="test_data_npy"
@@ -31,7 +32,7 @@ def preprocess(DATA_DIR,TARGET_DIR,OUTPUT_DIR):
             pickle.dump(graph, f)
 
 
-def stuct_embed(graph,dim,gamma,fmriTimeseries,community_size,use_edge_attr=True,normalization=None):
+def stuct_embed(timeseries,graph,dim,gamma,fmriTimeseries,community_size,use_edge_attr=True,normalization=None):
 
     data=utils.from_networkx(graph)
     ## adding the global embedding 
@@ -48,9 +49,15 @@ def stuct_embed(graph,dim,gamma,fmriTimeseries,community_size,use_edge_attr=True
 
     community=meso.createLouvainCommunity(graph,community_size)
     normtimeseries=meso.normaliseTimeSeries(community,fmriTimeseries)
-    meso_embed=meso.mesoEmbed()
+    community=meso.createLouvainCommunity(graph,1)
 
-    return local_feat,glob_embedding,meso_embed
+    
+
+    normalised_communities,node_idx_list=meso.normaliseTimeSeries(community,time_series)
+
+    node_map=meso.mesoEmbed(normalised_communities,node_idx_list)
+
+    return local_feat,glob_embedding,node_map
 
 
 

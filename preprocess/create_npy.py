@@ -34,7 +34,9 @@ def _prepare_raw_data(TARGET_DIR:str)->list[str]:
         except Exception as e:
             print(f"Error Log:{e}| Skipping file {filepath}")
     return npyList
+
 if __name__=='__main__':
     TARGET_DIR = "test_data_npy"
     a=_prepare_raw_data(TARGET_DIR)
+
 
