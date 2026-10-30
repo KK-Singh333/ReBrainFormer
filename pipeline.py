@@ -5,36 +5,30 @@ import pickle
 import torch_geometric.utils as utils
 import numpy as np
 
-DATA_DIR = "/home/snottyunhunter/ReBrainFormer/test_data/ABIDE_pcp/cpac/nofilt_noglobal"
-TARGET_DIR ="test_data_npy"
-OUTPUT_DIR="preprocessed_graphs"
 
-a= create_npy._prepare_raw_data(TARGET_DIR)
 
-def preprocess(DATA_DIR,TARGET_DIR,OUTPUT_DIR):
+def preprocess(files, OUTPUT_DIR):
+    os.makedirs(OUTPUT_DIR, exist_ok=True)
 
-    for i, file in enumerate(TARGET_DIR, start=1):
+    for i, file in enumerate(files, start=1):
+        print(f"Processing {i}/{len(files)}: {file}")
 
-        print(f"Processing {i}/{len(TARGET_DIR)}: {file}")
-
-        graph = build_graph(file)
+        graph = build_graph.build_graph(file)
         graph = build_graph.drop_fraction_of_neighbors(graph)
         graph = build_graph.changes_weight(graph, metric=None)
 
-        
-
-        output_path = os.path.join(
-            OUTPUT_DIR,
-            f"graph_{i}.gpickle"
-        )
+        filename = os.path.basename(file)
+        stem = os.path.splitext(filename)[0]
+        output_path = os.path.join(OUTPUT_DIR, f"{stem}.gpickle")
 
         with open(output_path, "wb") as f:
             pickle.dump(graph, f)
 
-
 def stuct_embed(timeseries,graph,dim,gamma,fmriTimeseries,community_size,use_edge_attr=True,normalization=None):
 
     data=utils.from_networkx(graph)
+
+    data.edge_attr = data.weight
     ## adding the global embedding 
     encoder = global_encoding.GlobalEncoding(
         dim = data.num_nodes,
@@ -45,25 +39,24 @@ def stuct_embed(timeseries,graph,dim,gamma,fmriTimeseries,community_size,use_edg
 
     ## adding the local embedding
 
-    local_feat=local_enc.feature_vec(graph)
+    curv_dict = local_enc.computing_curvature(graph)
+    graph = local_enc.addin_attr(graph, curv_dict)
+    local_feat, weight_mat = local_enc.feature_vec(graph)
 
-    community=meso.createLouvainCommunity(graph,community_size)
-    normtimeseries=meso.normaliseTimeSeries(community,fmriTimeseries)
-    community=meso.createLouvainCommunity(graph,1)
-
-    
-
-    normalised_communities,node_idx_list=meso.normaliseTimeSeries(community,time_series)
+    communities, _ = meso.createLouvainCommunity(graph, community_size)
+    normalised_communities, node_idx_list = meso.normaliseTimeSeries(
+        communities, fmriTimeseries
+    )
 
     node_map=meso.mesoEmbed(normalised_communities,node_idx_list)
 
     return local_feat,glob_embedding,node_map
 
+if __name__=='__main__':
 
+    DATA_DIR = "/home/snottyunhunter/ReBrainFormer/test_data/ABIDE_pcp/cpac/nofilt_noglobal"
+    TARGET_DIR ="test_data_npy"
+    OUTPUT_DIR="preprocessed_graphs"
 
-
-
-
-
-
+    a= create_npy._prepare_raw_data(TARGET_DIR)
 

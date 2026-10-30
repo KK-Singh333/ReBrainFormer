@@ -18,7 +18,7 @@ def feature_vec(graph):
     nodes = list(graph.nodes())
     node_idx = {n: i for i, n in enumerate(nodes)}
     feats = np.zeros((len(nodes), 5))
-    weight_mat=np.ndarray(len(nodes),len(nodes))
+    weight_mat = np.zeros((len(nodes), len(nodes)), dtype=float)
     for n in nodes:
         i = node_idx[n]
         neighbors = list(graph.neighbors(n))
@@ -26,7 +26,8 @@ def feature_vec(graph):
             feats[i] = [0.0, 0.0, 0.0, 0.0, 0.0]
             continue
         for neighbour in neighbors:
-            weight_mat[n][neighbour]=[graph[n][neighbour].get("weight", 1.0)]
+            j = node_idx[neighbour]
+            weight_mat[i, j] = graph[n][neighbour].get("weight", 1.0)
         incident = np.array([graph[n][nbr]["RicciCurvature"] for nbr in neighbors])
         mean_c = incident.mean()
         min_c = incident.min()

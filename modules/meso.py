@@ -9,7 +9,7 @@ def createLouvainCommunity(G, community_size):
     '''Creates communities based on Louvain Algo, return list of sets'''
     communities=nx.community.louvain_communities(G, seed=123, resolution=community_size)
     n=G.number_of_nodes()
-    community_mat=np.ndarray(n,n)
+    community_mat = np.zeros((n, n), dtype=int)
     for i in range(0,n):
         for j in range(0,i+1):
             flag=0

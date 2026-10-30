@@ -38,3 +38,5 @@ fMRIConfig = {
         "registration": "msmall",
         "freq": 0.05,
     }
+
+contr_temp=0.1
