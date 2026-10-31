@@ -1,13 +1,14 @@
 from nilearn import datasets
 
-# Fetch 2 subjects from the ABIDE dataset
-# 'func_preproc' downloads the 4D preprocessed functional MRI NIfTI data
-abide_data = datasets.fetch_abide_pcp(
+abide = datasets.fetch_abide_pcp(
     data_dir="test_data",
-    n_subjects=2,
-    derivatives=['func_preproc']
+    n_subjects=None,                 # all available subjects
+    pipeline="cpac",
+    band_pass_filtering=False,       # nofilt
+    global_signal_regression=False,  # noglobal
+    derivatives=["func_preproc"],    # 4D .nii.gz scans
+    quality_checked=False,           # include subjects regardless of QC rating
 )
 
-print("Downloaded 4D fMRI files:")
-for file_path in abide_data.func_preproc:
-    print(file_path)
+print("Downloaded scans:", len(abide.func_preproc))
+print("First scan:", abide.func_preproc[0])
