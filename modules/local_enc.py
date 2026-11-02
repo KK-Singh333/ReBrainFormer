@@ -1,11 +1,57 @@
 import pickle
+import sys
 import networkx as nx
 import numpy as np
+import ot
 from GraphRicciCurvature import OllivierRicci as oc
 
 
 def computing_curvature(graph):
+    if sys.platform == "win32":
+        return _serial_ricci_curvature(graph)
     return oc._compute_ricci_curvature_edges(graph, weight="weight", edge_list=graph.edges())
+
+
+def _serial_ricci_curvature(graph, alpha=0.5):
+    """Windows-safe equivalent of the library's default OTD edge calculation.
+
+    GraphRicciCurvature uses a Unix-only ``fork`` pool even when proc=1. For
+    these undirected ROI graphs (fewer than 3000 neighbors per node), its
+    OTDSinkhornMix default uses exact earth-mover distance for every edge.
+    """
+    if graph.is_directed():
+        raise ValueError("The serial curvature path expects an undirected graph")
+
+    nodes = list(graph.nodes)
+    node_index = {node: index for index, node in enumerate(nodes)}
+    distances = np.asarray(nx.floyd_warshall_numpy(graph, nodelist=nodes, weight="weight"))
+
+    def distribution(node):
+        neighbors = list(graph.neighbors(node))
+        if not neighbors:
+            return np.array([1.0]), [node]
+        weights = np.exp(-np.square([graph[node][nbr]["weight"] for nbr in neighbors]))
+        if weights.sum() > 1e-7:
+            masses = (1.0 - alpha) * weights / weights.sum()
+        else:
+            masses = np.full(len(neighbors), (1.0 - alpha) / len(neighbors))
+        return np.append(masses, alpha), neighbors + [node]
+
+    densities = {node: distribution(node) for node in nodes}
+    result = {}
+    for source, target in graph.edges:
+        source_mass, source_nodes = densities[source]
+        target_mass, target_nodes = densities[target]
+        cost = distances[np.ix_(
+            [node_index[node] for node in source_nodes],
+            [node_index[node] for node in target_nodes],
+        )]
+        distance = distances[node_index[source], node_index[target]]
+        result[(source, target)] = (
+            0.0 if distance < 1e-7
+            else 1.0 - float(ot.emd2(source_mass, target_mass, cost)) / distance
+        )
+    return result
 
 
 def addin_attr(graph, curv_dict):

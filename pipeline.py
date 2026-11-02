@@ -4,6 +4,7 @@ from pathlib import Path
 
 import networkx as nx
 import numpy as np
+import torch
 import torch_geometric.utils as pyg_utils
 
 from modules import global_encoding, local_enc, meso
@@ -13,29 +14,41 @@ from preprocess import build_graph, create_npy
 PROJECT_ROOT = Path(__file__).resolve().parent
 
 
-def spectral_entropy(adjacency, gamma):
-    """Entropy of the weighted graph Laplacian."""
-    laplacian = np.diag(adjacency.sum(axis=1)) - adjacency
-    eigenvalues = np.linalg.eigvalsh(laplacian)
-    logits = -gamma * eigenvalues
-    probabilities = np.exp(logits - logits.max())
-    probabilities /= probabilities.sum()
-    return float(-(probabilities * np.log(probabilities)).sum())
+def _spectral_entropy_tensor(adjacency, gamma):
+    """Spectral entropy for one adjacency or a batch of adjacencies."""
+    laplacian = torch.diag_embed(adjacency.sum(dim=-1)) - adjacency
+    eigenvalues = torch.linalg.eigvalsh(laplacian)
+    probabilities = torch.softmax(-gamma * eigenvalues, dim=-1)
+    return -torch.xlogy(probabilities, probabilities).sum(dim=-1)
 
 
-def node_entanglement(adjacency, gamma):
+def spectral_entropy(adjacency, gamma, device="cpu"):
+    """Entropy of the weighted graph Laplacian, using the selected device."""
+    device = torch.device(device)
+    dtype = torch.float32 if device.type == "cuda" else torch.float64
+    adjacency = torch.as_tensor(adjacency, dtype=dtype, device=device)
+    return float(_spectral_entropy_tensor(adjacency, gamma).item())
+
+
+def node_entanglement(adjacency, gamma, device="cpu"):
     """Change in spectral entropy when each ROI is removed."""
-    original = spectral_entropy(adjacency, gamma)
-    scores = np.empty(adjacency.shape[0], dtype=np.float32)
+    device = torch.device(device)
+    dtype = torch.float32 if device.type == "cuda" else torch.float64
+    adjacency = torch.as_tensor(adjacency, dtype=dtype, device=device)
+    n_rois = adjacency.shape[0]
+    original = _spectral_entropy_tensor(adjacency, gamma)
+    indices = torch.arange(n_rois, device=device).expand(n_rois, -1)
+    keep = indices[~torch.eye(n_rois, dtype=torch.bool, device=device)].reshape(n_rois, -1)
 
-    for node in range(adjacency.shape[0]):
-        reduced = np.delete(np.delete(adjacency, node, axis=0), node, axis=1)
-        scores[node] = abs(spectral_entropy(reduced, gamma) - original)
+    # Chunk the batched eigensolver to bound GPU memory for larger atlases.
+    scores = []
+    for kept_nodes in keep.split(16):
+        reduced = adjacency[kept_nodes[:, :, None], kept_nodes[:, None, :]]
+        scores.append((_spectral_entropy_tensor(reduced, gamma) - original).abs())
+    return torch.cat(scores).to(torch.float32).cpu().numpy()
 
-    return scores
 
-
-def process_subject(npy_path, graph_dir, feature_dir, gamma, resolution):
+def process_subject(npy_path, graph_dir, feature_dir, gamma, resolution, device="cpu"):
     time_by_roi = np.load(npy_path, allow_pickle=False)
     if time_by_roi.ndim != 2 or not np.isfinite(time_by_roi).all():
         raise ValueError(f"Invalid [time, ROI] array: {npy_path}")
@@ -77,15 +90,16 @@ def process_subject(npy_path, graph_dir, feature_dir, gamma, resolution):
     # separately because eigen_vecs() returns values indexed by eigenvalue.
     pyg_graph = pyg_utils.from_networkx(affinity_graph)
     pyg_graph.edge_attr = pyg_graph.weight
+    pyg_graph = pyg_graph.to(device)
     encoder = global_encoding.GlobalEncoding(
         dim=n_rois, use_edge_attr=True, normalization=None
     )
-    global_spectral = encoder.eigen_vecs(pyg_graph, gamma=gamma).numpy()
+    global_spectral = encoder.eigen_vecs(pyg_graph, gamma=gamma).cpu().numpy()
 
     affinity = nx.to_numpy_array(
         affinity_graph, nodelist=range(n_rois), weight="weight"
     )
-    entanglement = node_entanglement(affinity, gamma)
+    entanglement = node_entanglement(affinity, gamma, device=device)
 
     # Community matrix and the existing mesoscopic node representations.
     communities, community_matrix = meso.createLouvainCommunity(
@@ -157,15 +171,36 @@ def main():
     parser.add_argument("--feature-dir", type=Path, default=PROJECT_ROOT / "processed_features")
     parser.add_argument("--gamma", type=float, default=1.0)
     parser.add_argument("--resolution", type=float, default=1.0)
+    parser.add_argument(
+        "--device", choices=("auto", "cpu", "cuda"), default="auto",
+        help="Device for spectral calculations (default: CUDA when available)",
+    )
     parser.add_argument("--limit", type=int, default=None)
+    parser.add_argument(
+        "--overwrite-timeseries", action="store_true",
+        help="Re-extract scans even when .npy files already exist",
+    )
     parser.add_argument("--skip-extraction", action="store_true")
     args = parser.parse_args()
+
+    if args.limit is not None and args.limit < 1:
+        parser.error("--limit must be a positive integer")
+    if args.skip_extraction and args.overwrite_timeseries:
+        parser.error("--skip-extraction and --overwrite-timeseries cannot be combined")
+
+    if args.device == "cuda" and not torch.cuda.is_available():
+        parser.error("CUDA was requested but PyTorch cannot see a CUDA device")
+    device = "cuda" if args.device == "auto" and torch.cuda.is_available() else args.device
+    if device == "auto":
+        device = "cpu"
+    print(f"Spectral calculations: {device}; curvature and communities: CPU")
 
     if args.skip_extraction:
         files = sorted(args.timeseries_dir.glob("*_func_preproc*.npy"))
     else:
         files = create_npy._prepare_raw_data(
-            args.timeseries_dir, args.nifti_dir
+            args.timeseries_dir, args.nifti_dir,
+            limit=args.limit, overwrite=args.overwrite_timeseries,
         )
 
     if not files:
@@ -174,7 +209,7 @@ def main():
     for path in files[: args.limit]:
         process_subject(
             path, args.graph_dir, args.feature_dir,
-            args.gamma, args.resolution,
+            args.gamma, args.resolution, device,
         )
 
 

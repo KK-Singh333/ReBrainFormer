@@ -3,7 +3,6 @@ import pickle
 import torch
 import torch_geometric.utils as utils
 
-import numpy as np
 
 
 
@@ -16,22 +15,19 @@ class GlobalEncoding():
 
 
     def eigen_vecs(self,graph,gamma):
+        if self.normalisation == "rw":
+            raise ValueError("Random-walk Laplacian is not symmetric; use None or 'sym'")
         edge_att=graph.edge_attr if self.use_edge_attr else None
         edge_index,edge_att=utils.get_laplacian(graph.edge_index,edge_att,normalization=self.normalisation,num_nodes=graph.num_nodes)
-        L=utils.to_scipy_sparse_matrix(edge_index,edge_att)
-        EigVal,EigVec=np.linalg.eig(L.toarray())
-       
-        exp_eigenvalues = np.exp(-gamma * EigVal) # sorts the eigen value 
+        laplacian = edge_att.new_zeros((graph.num_nodes, graph.num_nodes))
+        laplacian.index_put_((edge_index[0], edge_index[1]), edge_att, accumulate=True)
+        dtype = torch.float32 if laplacian.device.type == "cuda" else torch.float64
+        eigenvalues = torch.linalg.eigvalsh(laplacian.to(dtype))
 
-        p =  (exp_eigenvalues) /np.sum(exp_eigenvalues)
-
-
-        log_p = (np.log(p))
-
-
-        embed=-1*p*log_p
-        ## purt
-        return (torch.from_numpy(embed).float())
+        # Same formula as before: p_k = exp(-gamma * lambda_k) / sum_j exp(...),
+        # and the returned vector contains -p_k * log(p_k).
+        p = torch.softmax(-gamma * eigenvalues, dim=0)
+        return (-torch.xlogy(p, p)).to(torch.float32)
 
     def purturbing_node(self, graph, gamma):
         
@@ -39,8 +35,7 @@ class GlobalEncoding():
         original_score = original_embed.sum()           # scalar total entropy
 
         num_nodes = graph.num_nodes
-        node_scores = torch.zeros(num_nodes)
-        per_node_embed_diff = torch.zeros(num_nodes, num_nodes)  # optional, elementwise diffs
+        per_node_embed_diff = original_embed.new_zeros(num_nodes, num_nodes)
 
         edge_index = graph.edge_index
         edge_attr = graph.edge_attr if self.use_edge_attr else None
@@ -61,7 +56,7 @@ class GlobalEncoding():
 
             per_node_embed_diff[node] = perturbed_embed - original_embed
 
-        return np.trace(per_node_embed_diff), per_node_embed_diff
+        return float(torch.trace(per_node_embed_diff).item()), per_node_embed_diff
 
 
   
@@ -75,7 +70,7 @@ if __name__=='__main__':
     data=utils.from_networkx(graph)
     encoder = GlobalEncoding(
         dim=data.num_nodes,
-        use_edge_att=True,
+        use_edge_attr=True,
         normalization=None
     )
 
