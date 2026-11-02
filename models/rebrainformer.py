@@ -36,6 +36,11 @@ class ReBrainFormer(nn.Module):
         self.Wv = nn.Parameter(torch.randn(args.Nodes, args.Nodes))
         self.Wk = nn.Parameter(torch.randn(args.Nodes, args.Nodes))
         self.classes = args.classes
+        dropout = float(getattr(args, "dropout", 0.0))
+        if not 0.0 <= dropout < 1.0:
+            raise ValueError("dropout must be in [0, 1)")
+        self.attention_dropout = nn.Dropout(dropout)
+        self.readout_dropout = nn.Dropout(dropout)
         self.classifier = nn.Linear(args.Nodes, self.classes)
 
     def self_attention_map(self, H, K_bias, N_E, C, roi_mask=None):
@@ -52,7 +57,10 @@ class ReBrainFormer(nn.Module):
             attention_scores = attention_scores.masked_fill(
                 ~roi_mask.unsqueeze(0), torch.finfo(attention_scores.dtype).min
             )
-        return torch.softmax(attention_scores, dim=-1) @ V
+        attention_weights = self.attention_dropout(
+            torch.softmax(attention_scores, dim=-1)
+        )
+        return attention_weights @ V
 
     def forward(self, x, roi_mask=None):
         if roi_mask is not None:
@@ -65,4 +73,4 @@ class ReBrainFormer(nn.Module):
         C = x[:, 3, :]
         Emb = self.self_attention_map(H, K_bias, NE, C, roi_mask=roi_mask)
         pooled = Emb.mean(dim=0) if roi_mask is None else Emb[roi_mask].mean(dim=0)
-        return self.classifier(pooled)
+        return self.classifier(self.readout_dropout(pooled))

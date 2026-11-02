@@ -144,6 +144,7 @@ def parse_args():
     parser.add_argument("--patience", type=int, default=10)
     parser.add_argument("--learning-rate", type=float, default=1e-4)
     parser.add_argument("--weight-decay", type=float, default=1e-4)
+    parser.add_argument("--dropout", type=float, default=0.2)
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--lambda1", type=float, default=1.0)
     parser.add_argument("--lambda2", type=float, default=1.0)
@@ -154,6 +155,8 @@ def parse_args():
         parser.error("--epochs, --batch-size, and --patience must be positive")
     if args.learning_rate <= 0 or args.weight_decay < 0:
         parser.error("--learning-rate must be positive and --weight-decay nonnegative")
+    if not 0.0 <= args.dropout < 1.0:
+        parser.error("--dropout must be in [0, 1)")
     if args.device == "cuda" and not torch.cuda.is_available():
         parser.error("CUDA was requested but PyTorch cannot see a CUDA device")
     return args
@@ -182,6 +185,7 @@ def main():
     model_args = SimpleNamespace(
         Nodes=n_rois, classes=2,
         lambda1=args.lambda1, lambda2=args.lambda2, lambda3=args.lambda3,
+        dropout=args.dropout,
     )
     model = ReBrainFormer(model_args).to(device)
     optimizer = torch.optim.AdamW(
@@ -196,6 +200,7 @@ def main():
         "lambda1": args.lambda1,
         "lambda2": args.lambda2,
         "lambda3": args.lambda3,
+        "dropout": args.dropout,
     }
     (run_dir / "model_config.json").write_text(
         json.dumps(model_config, indent=2), encoding="utf-8"
@@ -251,6 +256,7 @@ def main():
         "config": {
             "seed": args.seed, "epochs": args.epochs, "batch_size": args.batch_size,
             "learning_rate": args.learning_rate, "weight_decay": args.weight_decay,
+            "dropout": args.dropout,
             "lambda1": args.lambda1, "lambda2": args.lambda2, "lambda3": args.lambda3,
         },
     }
