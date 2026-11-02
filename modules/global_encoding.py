@@ -8,11 +8,11 @@ import numpy as np
 
 
 class GlobalEncoding():
-    def __init__(self,dim,use_edge_att=False,normalization=None):
+    def __init__(self,dim,use_edge_attr=False,normalization=None):
 
         self.pos_enc_dim=dim
         self.normalisation=normalization
-        self.use_edge_attr=use_edge_att
+        self.use_edge_attr=use_edge_attr
 
 
     def eigen_vecs(self,graph,gamma):

@@ -1,42 +1,51 @@
+from pathlib import Path
+
 import numpy as np
-from preprocess.load_graph import _fmri_extractor,_fmri_extractor_metadata
-import torch
-import os
+
 from configs.fmri_extractor import fMRIConfig
-DATA_DIR = "/home/snottyunhunter/ReBrainFormer/test_data/ABIDE_pcp/cpac/nofilt_noglobal"
+from preprocess.load_graph import _fmri_extractor, _fmri_extractor_metadata
 
 
-def _prepare_raw_data(TARGET_DIR:str)->list[str]:
-    '''The function takes the path to raw niftii file, converts them to .npy files and returns the list of filenames of npy file'''
-    if(not os.path.exists(TARGET_DIR)):
-        os.mkdir(TARGET_DIR)
-    npyList=[]
-    for file in os.listdir(DATA_DIR):
-        if not (file.endswith('.nii') or file.endswith('.nii.gz')):
+def _prepare_raw_data(target_dir, data_dir):
+    data_dir = Path(data_dir)
+    target_dir = Path(target_dir)
+
+    if not data_dir.is_dir():
+        raise FileNotFoundError(f"NIfTI directory does not exist: {data_dir}")
+
+    scans = sorted(
+        path for path in data_dir.iterdir()
+        if path.is_file() and path.name.endswith((".nii", ".nii.gz"))
+    )
+    if not scans:
+        raise FileNotFoundError(f"No .nii or .nii.gz scans in {data_dir}")
+
+    target_dir.mkdir(parents=True, exist_ok=True)
+    outputs = []
+
+    for index, scan in enumerate(scans, start=1):
+        # Keep the existing .nii.npy naming expected by AbideDataset.
+        output = target_dir / f"{scan.name.removesuffix('.gz')}.npy"
+
+        if output.exists():
+            print(f"[{index}/{len(scans)}] Reusing {output}")
+            outputs.append(output)
             continue
-        filepath=os.path.join(DATA_DIR,file)
-        try:
-            event = _fmri_extractor_metadata(
-                    filepath,
-                    fMRIConfig,
-                )
-            if event is None:
-                raise RuntimeError("Failed to create Fmri event.")
-            fmri = _fmri_extractor(event)
-            npy_timeseries=fmri.numpy()
-            print(npy_timeseries)
-            target_file = os.path.join(
-                    TARGET_DIR,
-                    os.path.splitext(os.path.basename(filepath))[0] + ".npy"
-                )
-            np.save(target_file,npy_timeseries)
-            npyList.append(target_file)
-        except Exception as e:
-            print(f"Error Log:{e}| Skipping file {filepath}")
-    return npyList
 
-if __name__=='__main__':
-    TARGET_DIR = "test_data_npy"
-    a=_prepare_raw_data(TARGET_DIR)
+        print(f"[{index}/{len(scans)}] Extracting {scan}")
+        event = _fmri_extractor_metadata(str(scan), fMRIConfig)
+        if event is None:
+            raise RuntimeError(f"Could not create fMRI event for {scan}")
 
+        fmri = _fmri_extractor(event)
+        if fmri is None:
+            raise RuntimeError(f"Could not extract ROI signals from {scan}")
 
+        array = np.asarray(fmri.numpy() if hasattr(fmri, "numpy") else fmri)
+        if array.ndim != 2 or not np.isfinite(array).all():
+            raise ValueError(f"Invalid [time, ROI] array from {scan}: {array.shape}")
+
+        np.save(output, array)
+        outputs.append(output)
+
+    return outputs
