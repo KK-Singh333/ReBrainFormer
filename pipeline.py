@@ -9,6 +9,7 @@ import torch_geometric.utils as pyg_utils
 
 from modules import global_encoding, local_enc, meso
 from preprocess import build_graph, create_npy
+from preprocess.correlation import roi_correlation
 
 
 PROJECT_ROOT = Path(__file__).resolve().parent
@@ -58,10 +59,10 @@ def process_subject(npy_path, graph_dir, feature_dir, gamma, resolution, device=
     if n_rois < 2 or time_by_roi.shape[0] < 2:
         raise ValueError(f"Too few ROIs or time points: {npy_path}")
 
-    correlation = np.corrcoef(roi_by_time).astype(np.float32)
-    if not np.isfinite(correlation).all():
-        raise ValueError(f"Undefined ROI correlation: {npy_path}")
-    np.fill_diagonal(correlation, 0.0)
+    correlation, roi_mask = roi_correlation(time_by_roi)
+    valid_nodes = np.flatnonzero(roi_mask)
+    if not roi_mask.all():
+        print(f"{npy_path.name}: masking constant ROIs {np.flatnonzero(~roi_mask).tolist()}")
 
     # Sparsify using the existing rule, then create separate positive weights:
     # distances for curvature and affinities for Louvain/Laplacian.
@@ -88,18 +89,31 @@ def process_subject(npy_path, graph_dir, feature_dir, gamma, resolution, device=
 
     # Global encoding uses affinities. Node entanglement is calculated
     # separately because eigen_vecs() returns values indexed by eigenvalue.
-    pyg_graph = pyg_utils.from_networkx(affinity_graph)
-    pyg_graph.edge_attr = pyg_graph.weight
+    valid_graph = nx.convert_node_labels_to_integers(
+        affinity_graph.subgraph(valid_nodes).copy(), ordering="sorted"
+    )
+    pyg_graph = pyg_utils.from_networkx(valid_graph)
+    pyg_graph.edge_attr = (
+        pyg_graph.weight if hasattr(pyg_graph, "weight")
+        else torch.empty(0, dtype=torch.float32)
+    )
     pyg_graph = pyg_graph.to(device)
     encoder = global_encoding.GlobalEncoding(
-        dim=n_rois, use_edge_attr=True, normalization=None
+        dim=len(valid_nodes), use_edge_attr=True, normalization=None
     )
-    global_spectral = encoder.eigen_vecs(pyg_graph, gamma=gamma).cpu().numpy()
+    spectral_valid = encoder.eigen_vecs(pyg_graph, gamma=gamma).cpu().numpy()
+    # Components are indexed by eigenvalue, not by ROI. Pad only to keep a
+    # fixed saved shape; this vector is not a node embedding.
+    global_spectral = np.zeros(n_rois, dtype=np.float32)
+    global_spectral[:len(spectral_valid)] = spectral_valid
 
     affinity = nx.to_numpy_array(
         affinity_graph, nodelist=range(n_rois), weight="weight"
     )
-    entanglement = node_entanglement(affinity, gamma, device=device)
+    entanglement = np.zeros(n_rois, dtype=np.float32)
+    entanglement[valid_nodes] = node_entanglement(
+        affinity[np.ix_(valid_nodes, valid_nodes)], gamma, device=device
+    )
 
     # Community matrix and the existing mesoscopic node representations.
     communities, community_matrix = meso.createLouvainCommunity(
@@ -155,6 +169,7 @@ def process_subject(npy_path, graph_dir, feature_dir, gamma, resolution, device=
         entanglement=entanglement,
         meso_features=meso_features,
         correlation=correlation,
+        roi_mask=roi_mask,
     )
     print(f"Saved {stem}: {n_rois} ROIs, input {model_input.shape}")
 
@@ -181,6 +196,10 @@ def main():
         help="Re-extract scans even when .npy files already exist",
     )
     parser.add_argument("--skip-extraction", action="store_true")
+    parser.add_argument(
+        "--resume", action="store_true",
+        help="Skip subjects whose graph and masked feature archive already exist",
+    )
     args = parser.parse_args()
 
     if args.limit is not None and args.limit < 1:
@@ -207,6 +226,13 @@ def main():
         raise FileNotFoundError("No extracted ABIDE .npy files found")
 
     for path in files[: args.limit]:
+        feature_path = args.feature_dir / f"{path.stem}.npz"
+        graph_path = args.graph_dir / f"{path.stem}.gpickle"
+        if args.resume and feature_path.exists() and graph_path.exists():
+            with np.load(feature_path, allow_pickle=False) as saved:
+                if "roi_mask" in saved.files:
+                    print(f"Reusing features for {path.stem}")
+                    continue
         process_subject(
             path, args.graph_dir, args.feature_dir,
             args.gamma, args.resolution, device,

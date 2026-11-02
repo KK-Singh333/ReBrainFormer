@@ -5,17 +5,11 @@ import math
 import pickle
 import argparse
 from pathlib import Path
+from preprocess.correlation import roi_correlation
 
 def build_graph(file_path):
-    
-    fmri = np.load(file_path)
-    fmri = fmri.squeeze() 
-
-    if fmri.shape[0] >= fmri.shape[1]:
-        fmri = fmri.T
-
-    corr = np.corrcoef(fmri) # making the correlation matrix
-    np.fill_diagonal(corr, 0) # removing the self loops
+    fmri = np.load(file_path, allow_pickle=False)
+    corr, _ = roi_correlation(fmri)  # saved arrays are [time, ROI]
 
     G = nx.from_numpy_array(corr)
     

@@ -13,6 +13,8 @@ import torch
 from sklearn.model_selection import train_test_split
 from torch.utils.data import Dataset, Subset
 
+from preprocess.correlation import roi_correlation
+
 
 def _file_id(path):
     """Recover the ABIDE FILE_ID from supported cached time-series names."""
@@ -97,16 +99,12 @@ class AbideDataset(Dataset):
             raise ValueError(f"Non-finite ROI signal in {record['path']}")
 
         roi_by_time = np.asarray(time_by_roi.T, dtype=np.float32)
-        if np.any(np.std(roi_by_time, axis=1) == 0):
-            raise ValueError(f"Constant ROI signal in {record['path']}; correlation is undefined")
-        correlation = np.corrcoef(roi_by_time).astype(np.float32)
-        if not np.isfinite(correlation).all():
-            raise ValueError(f"Non-finite ROI correlation in {record['path']}")
-        np.fill_diagonal(correlation, 0.0)
+        correlation, roi_mask = roi_correlation(time_by_roi)
 
         return {
             "timeseries": torch.from_numpy(roi_by_time.copy()),  # [N, T]
             "correlation": torch.from_numpy(correlation),  # [N, N]
+            "roi_mask": torch.from_numpy(roi_mask.copy()),  # [N], True for usable ROI
             "label": torch.tensor(record["label"], dtype=torch.long),
             "subject_id": record["subject_id"],
             "site": record["site"],
@@ -136,6 +134,7 @@ def collate_abide(samples):
         "time_mask": time_mask,  # [B, max(T)]
         "lengths": torch.tensor([s["timeseries"].shape[1] for s in samples]),
         "correlation": torch.stack([s["correlation"] for s in samples]),
+        "roi_mask": torch.stack([s["roi_mask"] for s in samples]),
         "label": torch.stack([s["label"] for s in samples]),
         "subject_id": [s["subject_id"] for s in samples],
         "site": [s["site"] for s in samples],

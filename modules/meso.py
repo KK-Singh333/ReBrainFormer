@@ -36,7 +36,13 @@ def normaliseTimeSeries(communities, fmriTimeseries):
 
         fmriTimeseries_tensor = torch.tensor(communityTimeseries, dtype=torch.float32)
         
-        fmriTimeseries_norm_tensor = (fmriTimeseries_tensor - fmriTimeseries_tensor.min()) / (fmriTimeseries_tensor.max() - fmriTimeseries_tensor.min())
+        spread = fmriTimeseries_tensor.max() - fmriTimeseries_tensor.min()
+        if spread <= 1e-8:
+            fmriTimeseries_norm_tensor = torch.zeros_like(fmriTimeseries_tensor)
+        else:
+            fmriTimeseries_norm_tensor = (
+                fmriTimeseries_tensor - fmriTimeseries_tensor.min()
+            ) / spread
         
         community_tensor.append(fmriTimeseries_norm_tensor)
         node_idx_list.append(community_list)
@@ -50,33 +56,43 @@ def mesoEmbed(normTimeSeries, communities):
     node_map = {}
     for community_idx, community in enumerate(normTimeSeries):
         community_ave = torch.mean(community, dim=0)
-        community_stl = STL(
-            pd.Series(community_ave.numpy()),
-            period=12
-        ).fit()
-        trend_t = torch.tensor(
-            community_stl.trend.values,
-            dtype=torch.float32
-        )
+        if community_ave.std() <= 1e-8:
+            trend_t = None
+        else:
+            community_stl = STL(
+                pd.Series(community_ave.numpy()), period=12
+            ).fit()
+            trend_t = torch.tensor(
+                community_stl.trend.values, dtype=torch.float32
+            )
         for idx, vec in enumerate(community):
             node_idx = communities[community_idx][idx]
-            node_stl = STL(
-                pd.Series(vec.numpy()),
-                period=12
-            ).fit()
-            vec_trend_t = torch.tensor(
-                node_stl.trend.values,
-                dtype=torch.float32
-            )
-            corr = torch.corrcoef(
-                torch.stack([trend_t, vec_trend_t])
-            )[0, 1].item()
-            alpha = (corr + 1) / 2
+            if vec.std() <= 1e-8:
+                node_map[node_idx] = torch.zeros_like(vec)
+                continue
+            if trend_t is None:
+                alpha = 0.0
+            else:
+                node_stl = STL(pd.Series(vec.numpy()), period=12).fit()
+                vec_trend_t = torch.tensor(
+                    node_stl.trend.values, dtype=torch.float32
+                )
+                if trend_t.std() <= 1e-8 or vec_trend_t.std() <= 1e-8:
+                    alpha = 0.0
+                else:
+                    corr = torch.corrcoef(
+                        torch.stack([trend_t, vec_trend_t])
+                    )[0, 1].item()
+                    alpha = (corr + 1) / 2 if np.isfinite(corr) else 0.0
             final_repr = (
                 alpha * community_ave +
                 (1 - alpha) * vec
             )
-            final_repr = (final_repr - final_repr.mean()) / final_repr.std()
+            spread = final_repr.std()
+            final_repr = (
+                (final_repr - final_repr.mean()) / spread
+                if spread > 1e-8 else torch.zeros_like(final_repr)
+            )
             node_map[node_idx] = final_repr
     return node_map
 

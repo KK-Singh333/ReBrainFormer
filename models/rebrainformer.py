@@ -38,7 +38,7 @@ class ReBrainFormer(nn.Module):
         self.classes = args.classes
         self.classifier = nn.Linear(args.Nodes, self.classes)
 
-    def self_attention_map(self, H, K_bias, N_E, C):
+    def self_attention_map(self, H, K_bias, N_E, C, roi_mask=None):
         Q = H @ self.Wq
         K_proj = H @ self.Wk
         V = H @ self.Wv
@@ -48,13 +48,21 @@ class ReBrainFormer(nn.Module):
             + self.lambda2 * N_E
             + self.lambda3 * C
         )
+        if roi_mask is not None:
+            attention_scores = attention_scores.masked_fill(
+                ~roi_mask.unsqueeze(0), torch.finfo(attention_scores.dtype).min
+            )
         return torch.softmax(attention_scores, dim=-1) @ V
 
-    def forward(self, x):
+    def forward(self, x, roi_mask=None):
+        if roi_mask is not None:
+            roi_mask = roi_mask.to(device=x.device, dtype=torch.bool)
+            if roi_mask.shape != (self.args.Nodes,) or not roi_mask.any():
+                raise ValueError("roi_mask must be [Nodes] with at least one valid ROI")
         H = x[:, 0, :]
         K_bias = x[:, 1, :]
         NE = x[:, 2, :]
         C = x[:, 3, :]
-        Emb = self.self_attention_map(H, K_bias, NE, C)
-        pooled = Emb.mean(dim=0)
+        Emb = self.self_attention_map(H, K_bias, NE, C, roi_mask=roi_mask)
+        pooled = Emb.mean(dim=0) if roi_mask is None else Emb[roi_mask].mean(dim=0)
         return self.classifier(pooled)
