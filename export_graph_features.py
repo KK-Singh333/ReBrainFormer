@@ -13,6 +13,9 @@ from preprocess.build_graph import build_graph, changes_weight, drop_fraction_of
 from preprocess.load_graph import _fmri_extractor, _fmri_extractor_metadata
 
 
+PROJECT_ROOT = Path(__file__).resolve().parent
+
+
 def _ensure_numpy_array(x):
     if isinstance(x, torch.Tensor):
         return x.detach().cpu().numpy()
@@ -156,9 +159,9 @@ def collect_input_files(input_dir: Path):
 
 def main():
     parser = argparse.ArgumentParser(description="Preprocess NIfTI files and export graph embedding matrices as .npy files.")
-    parser.add_argument("--input-dir", type=Path, default=Path("test_data"), help="Folder containing .nii, .nii.gz or .npy files.")
-    parser.add_argument("--output-dir", type=Path, default=Path("processed_embeddings"), help="Folder where .npy outputs will be saved.")
-    parser.add_argument("--scratch-dir", type=Path, default=Path("tmp_npy_exports"), help="Temporary folder for extracted .npy arrays.")
+    parser.add_argument("--input-dir", type=Path, default=PROJECT_ROOT / "test_data", help="Folder containing .nii, .nii.gz or .npy files.")
+    parser.add_argument("--output-dir", type=Path, default=PROJECT_ROOT / "processed_embeddings", help="Folder where .npy outputs will be saved.")
+    parser.add_argument("--scratch-dir", type=Path, default=PROJECT_ROOT / "tmp_npy_exports", help="Temporary folder for extracted .npy arrays.")
     args = parser.parse_args()
 
     files = collect_input_files(args.input_dir)

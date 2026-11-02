@@ -1,8 +1,10 @@
 import os
+import argparse
+from pathlib import Path
 import numpy as np
 from neuralset import events, extractors
 
-from configs.fmri_extractor import FMRI_EXTRACTOR_CONFIG
+from configs.fmri_extractor import FMRI_EXTRACTOR_CONFIG, fMRIConfig
 
 
 def _fmri_extractor_metadata(
@@ -70,21 +72,12 @@ def _fmri_extractor(event: events.etypes.Fmri) -> np.ndarray | None:
 
 
 if __name__ == "__main__":
-   
-    test_file_path = (
-        r"E:\ReBrainFormer\ReBrainFormer\test_data"
-        r"\ABIDE_51038_MRI_Resting_State_fMRI_br_raw_20120829200031740_S163361_I327304.nii"
-    )
-
-    fMRIConfig = {
-        "preproc": "fmriprep",
-        "resolution": "2.0mm",
-        "registration": "msmall",
-        "freq": 0.05,
-    }
+    parser = argparse.ArgumentParser(description="Extract ROI signals from one NIfTI scan.")
+    parser.add_argument("nifti_path", type=Path, help="Path to a .nii or .nii.gz scan")
+    args = parser.parse_args()
 
     event = _fmri_extractor_metadata(
-        test_file_path,
+        str(args.nifti_path),
         fMRIConfig,
     )
 

@@ -4,6 +4,8 @@ from statsmodels.tsa.seasonal import STL
 import pandas as pd
 import pickle
 import numpy as np
+import argparse
+from pathlib import Path
 
 def createLouvainCommunity(G, community_size):
     '''Creates communities based on Louvain Algo, return list of sets'''
@@ -79,17 +81,20 @@ def mesoEmbed(normTimeSeries, communities):
     return node_map
 
 if __name__=='__main__':
+    parser = argparse.ArgumentParser(description="Inspect mesoscopic features for one graph.")
+    parser.add_argument("graph_path", type=Path, help="Path to a .gpickle graph")
+    parser.add_argument("timeseries_path", type=Path, help="Path to a [time, ROI] .npy file")
+    args = parser.parse_args()
 
-
-    with open("graph.gpickle", "rb") as f:
+    with args.graph_path.open("rb") as f:
         graph = pickle.load(f)
 
 
-    community=createLouvainCommunity(graph,1)
+    communities, _ = createLouvainCommunity(graph, 1)
 
-    time_series=np.load("/home/snottyunhunter/ReBrainFormer/test_data_npy/Pitt_0050003_func_preproc.nii.npy")
+    time_series = np.load(args.timeseries_path, allow_pickle=False).T
 
-    normalised_communities,node_idx_list=normaliseTimeSeries(community,time_series)
+    normalised_communities,node_idx_list=normaliseTimeSeries(communities,time_series)
 
     node_map=mesoEmbed(normalised_communities,node_idx_list)
 

@@ -3,6 +3,8 @@ import numpy as np
 import os
 import math
 import pickle
+import argparse
+from pathlib import Path
 
 def build_graph(file_path):
     
@@ -74,11 +76,17 @@ def changes_weight(graph,metric=None):
 
 
 if __name__=='__main__':
-    graph=build_graph("/home/snottyunhunter/ReBrainFormer/test_data_npy/Pitt_0050003_func_preproc.nii.npy")
+    parser = argparse.ArgumentParser(description="Build a graph from one ROI time-series array.")
+    parser.add_argument("timeseries_path", type=Path, help="Path to a [time, ROI] .npy file")
+    parser.add_argument("--output", type=Path, default=Path("graph.gpickle"))
+    args = parser.parse_args()
+
+    graph=build_graph(args.timeseries_path)
     graph=drop_fraction_of_neighbors(graph)
     graph=changes_weight(graph,metric=None)
 
-    with open("graph.gpickle", "wb") as f:
+    args.output.parent.mkdir(parents=True, exist_ok=True)
+    with args.output.open("wb") as f:
         pickle.dump(graph, f)
 
     print(graph)

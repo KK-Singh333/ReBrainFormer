@@ -10,6 +10,9 @@ from modules import global_encoding, local_enc, meso
 from preprocess import build_graph, create_npy
 
 
+PROJECT_ROOT = Path(__file__).resolve().parent
+
+
 def spectral_entropy(adjacency, gamma):
     """Entropy of the weighted graph Laplacian."""
     laplacian = np.diag(adjacency.sum(axis=1)) - adjacency
@@ -147,11 +150,11 @@ def main():
     parser.add_argument(
         "--nifti-dir",
         type=Path,
-        default=Path("test_data/ABIDE_pcp/cpac/nofilt_noglobal"),
+        default=PROJECT_ROOT / "test_data/ABIDE_pcp/cpac/nofilt_noglobal",
     )
-    parser.add_argument("--timeseries-dir", type=Path, default=Path("test_data_npy"))
-    parser.add_argument("--graph-dir", type=Path, default=Path("preprocessed_graphs"))
-    parser.add_argument("--feature-dir", type=Path, default=Path("processed_features"))
+    parser.add_argument("--timeseries-dir", type=Path, default=PROJECT_ROOT / "test_data_npy")
+    parser.add_argument("--graph-dir", type=Path, default=PROJECT_ROOT / "preprocessed_graphs")
+    parser.add_argument("--feature-dir", type=Path, default=PROJECT_ROOT / "processed_features")
     parser.add_argument("--gamma", type=float, default=1.0)
     parser.add_argument("--resolution", type=float, default=1.0)
     parser.add_argument("--limit", type=int, default=None)
