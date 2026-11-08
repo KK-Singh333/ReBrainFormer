@@ -1,23 +1,30 @@
 import argparse
+import json
 import pickle
 from pathlib import Path
 
 import networkx as nx
 import numpy as np
 import torch
-import torch_geometric.utils as pyg_utils
 
-from modules import global_encoding, local_enc, meso
+from modules import local_enc, meso
 from preprocess import build_graph, create_npy
 from preprocess.correlation import roi_correlation
+from preprocess.cache import feature_metadata, validate_feature_archive, validate_timeseries
 
 
 PROJECT_ROOT = Path(__file__).resolve().parent
 
 
-def _spectral_entropy_tensor(adjacency, gamma):
+def _laplacian_scale(adjacency):
+    return adjacency.sum(dim=-1).mean(dim=-1).clamp_min(1e-8)
+
+
+def _spectral_entropy_tensor(adjacency, gamma, scale=None):
     """Spectral entropy for one adjacency or a batch of adjacencies."""
     laplacian = torch.diag_embed(adjacency.sum(dim=-1)) - adjacency
+    scale = _laplacian_scale(adjacency) if scale is None else scale
+    laplacian = laplacian / scale[..., None, None]
     eigenvalues = torch.linalg.eigvalsh(laplacian)
     probabilities = torch.softmax(-gamma * eigenvalues, dim=-1)
     return -torch.xlogy(probabilities, probabilities).sum(dim=-1)
@@ -37,7 +44,10 @@ def node_entanglement(adjacency, gamma, device="cpu"):
     dtype = torch.float32 if device.type == "cuda" else torch.float64
     adjacency = torch.as_tensor(adjacency, dtype=dtype, device=device)
     n_rois = adjacency.shape[0]
-    original = _spectral_entropy_tensor(adjacency, gamma)
+    # Use the ORIGINAL graph's scale for every removal, so changing the
+    # normalization itself cannot masquerade as node entanglement.
+    scale = _laplacian_scale(adjacency)
+    original = _spectral_entropy_tensor(adjacency, gamma, scale)
     indices = torch.arange(n_rois, device=device).expand(n_rois, -1)
     keep = indices[~torch.eye(n_rois, dtype=torch.bool, device=device)].reshape(n_rois, -1)
 
@@ -45,11 +55,22 @@ def node_entanglement(adjacency, gamma, device="cpu"):
     scores = []
     for kept_nodes in keep.split(16):
         reduced = adjacency[kept_nodes[:, :, None], kept_nodes[:, None, :]]
-        scores.append((_spectral_entropy_tensor(reduced, gamma) - original).abs())
+        scores.append((_spectral_entropy_tensor(reduced, gamma, scale) - original).abs())
     return torch.cat(scores).to(torch.float32).cpu().numpy()
 
 
+def entanglement_attention_bias(entanglement, roi_mask):
+    values = np.zeros_like(entanglement, dtype=np.float32)
+    valid = np.asarray(entanglement)[roi_mask]
+    spread = valid.std()
+    if spread > 1e-8:
+        values[roi_mask] = (valid - valid.mean()) / spread
+    return np.broadcast_to(values[None, :], (len(values), len(values))).copy()
+
+
 def process_subject(npy_path, graph_dir, feature_dir, gamma, resolution, device="cpu"):
+    npy_path, graph_dir, feature_dir = map(Path, (npy_path, graph_dir, feature_dir))
+    validate_timeseries(npy_path)
     time_by_roi = np.load(npy_path, allow_pickle=False)
     if time_by_roi.ndim != 2 or not np.isfinite(time_by_roi).all():
         raise ValueError(f"Invalid [time, ROI] array: {npy_path}")
@@ -87,26 +108,7 @@ def process_subject(npy_path, graph_dir, feature_dir, gamma, resolution, device=
         curvature_bias[u, v] = value
         curvature_bias[v, u] = value
 
-    # Global encoding uses affinities. Node entanglement is calculated
-    # separately because eigen_vecs() returns values indexed by eigenvalue.
-    valid_graph = nx.convert_node_labels_to_integers(
-        affinity_graph.subgraph(valid_nodes).copy(), ordering="sorted"
-    )
-    pyg_graph = pyg_utils.from_networkx(valid_graph)
-    pyg_graph.edge_attr = (
-        pyg_graph.weight if hasattr(pyg_graph, "weight")
-        else torch.empty(0, dtype=torch.float32)
-    )
-    pyg_graph = pyg_graph.to(device)
-    encoder = global_encoding.GlobalEncoding(
-        dim=len(valid_nodes), use_edge_attr=True, normalization=None
-    )
-    spectral_valid = encoder.eigen_vecs(pyg_graph, gamma=gamma).cpu().numpy()
-    # Components are indexed by eigenvalue, not by ROI. Pad only to keep a
-    # fixed saved shape; this vector is not a node embedding.
-    global_spectral = np.zeros(n_rois, dtype=np.float32)
-    global_spectral[:len(spectral_valid)] = spectral_valid
-
+    # Global encoding uses affinities; spectra are graph-level diagnostics.
     affinity = nx.to_numpy_array(
         affinity_graph, nodelist=range(n_rois), weight="weight"
     )
@@ -114,6 +116,15 @@ def process_subject(npy_path, graph_dir, feature_dir, gamma, resolution, device=
     entanglement[valid_nodes] = node_entanglement(
         affinity[np.ix_(valid_nodes, valid_nodes)], gamma, device=device
     )
+    # Spectrum is a graph-level diagnostic, never assigned to ROI indices.
+    valid_affinity = torch.as_tensor(
+        affinity[np.ix_(valid_nodes, valid_nodes)], device=device,
+        dtype=torch.float32 if torch.device(device).type == "cuda" else torch.float64,
+    )
+    scale = _laplacian_scale(valid_affinity)
+    laplacian = (torch.diag(valid_affinity.sum(-1)) - valid_affinity) / scale
+    probabilities = torch.softmax(-gamma * torch.linalg.eigvalsh(laplacian), dim=-1)
+    global_spectral = (-torch.xlogy(probabilities, probabilities)).float().cpu().numpy()
 
     # Community matrix and the existing mesoscopic node representations.
     communities, community_matrix = meso.createLouvainCommunity(
@@ -128,12 +139,10 @@ def process_subject(npy_path, graph_dir, feature_dir, gamma, resolution, device=
         for node in range(n_rois)
     ])
 
-    # Existing ReBrainFormer.forward expects one [N, 4, N] tensor.
-    # Its channels are H, curvature bias, destination-node entanglement,
+    # Each subject stores [N, 4, N]; the model also supports batches.
+    # Its channels are H, curvature bias, standardized destination entanglement,
     # and same-community bias.
-    entanglement_bias = np.broadcast_to(
-        entanglement[None, :], (n_rois, n_rois)
-    )
+    entanglement_bias = entanglement_attention_bias(entanglement, roi_mask)
     model_input = np.stack(
         (
             correlation,
@@ -170,6 +179,8 @@ def process_subject(npy_path, graph_dir, feature_dir, gamma, resolution, device=
         meso_features=meso_features,
         correlation=correlation,
         roi_mask=roi_mask,
+        metadata_json=json.dumps(feature_metadata(npy_path, gamma, resolution), sort_keys=True),
+        spectral_scale=float(scale),
     )
     print(f"Saved {stem}: {n_rois} ROIs, input {model_input.shape}")
 
@@ -206,6 +217,8 @@ def main():
         parser.error("--limit must be a positive integer")
     if args.skip_extraction and args.overwrite_timeseries:
         parser.error("--skip-extraction and --overwrite-timeseries cannot be combined")
+    if not np.isfinite(args.gamma) or args.gamma <= 0 or not np.isfinite(args.resolution) or args.resolution <= 0:
+        parser.error("--gamma and --resolution must be finite and positive")
 
     if args.device == "cuda" and not torch.cuda.is_available():
         parser.error("CUDA was requested but PyTorch cannot see a CUDA device")
@@ -226,11 +239,16 @@ def main():
         raise FileNotFoundError("No extracted ABIDE .npy files found")
 
     for path in files[: args.limit]:
+        validate_timeseries(path)
         feature_path = args.feature_dir / f"{path.stem}.npz"
         graph_path = args.graph_dir / f"{path.stem}.gpickle"
         if args.resume and feature_path.exists() and graph_path.exists():
             with np.load(feature_path, allow_pickle=False) as saved:
-                if "roi_mask" in saved.files:
+                try:
+                    validate_feature_archive(saved, path, args.gamma, args.resolution)
+                except ValueError:
+                    print(f"Rebuilding outdated features for {path.stem}")
+                else:
                     print(f"Reusing features for {path.stem}")
                     continue
         process_subject(

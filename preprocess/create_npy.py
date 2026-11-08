@@ -4,6 +4,19 @@ import numpy as np
 
 from configs.fmri_extractor import fMRIConfig
 from preprocess.load_graph import _fmri_extractor, _fmri_extractor_metadata
+from preprocess.cache import validate_timeseries, write_timeseries_metadata
+from configs.fmri_extractor import FMRI_EXTRACTOR_CONFIG
+
+
+def extraction_config():
+    settings = {key: value for key, value in FMRI_EXTRACTOR_CONFIG.items() if key != "infra"}
+    return {
+        "scan": dict(fMRIConfig),
+        "extractor": {
+            key: value.model_dump(mode="json") if hasattr(value, "model_dump") else value
+            for key, value in settings.items()
+        },
+    }
 
 
 def _prepare_raw_data(target_dir, data_dir, limit=None, overwrite=False):
@@ -24,15 +37,21 @@ def _prepare_raw_data(target_dir, data_dir, limit=None, overwrite=False):
 
     target_dir.mkdir(parents=True, exist_ok=True)
     outputs = []
+    config = extraction_config()
 
     for index, scan in enumerate(scans, start=1):
         # Keep the existing .nii.npy naming expected by AbideDataset.
         output = target_dir / f"{scan.name.removesuffix('.gz')}.npy"
 
         if output.exists() and not overwrite:
-            print(f"[{index}/{len(scans)}] Reusing {output}")
-            outputs.append(output)
-            continue
+            try:
+                validate_timeseries(output, source=scan, config=config)
+            except ValueError:
+                print(f"[{index}/{len(scans)}] Re-extracting outdated cache {output}")
+            else:
+                print(f"[{index}/{len(scans)}] Reusing verified {output}")
+                outputs.append(output)
+                continue
 
         print(f"[{index}/{len(scans)}] Extracting {scan}")
         event = _fmri_extractor_metadata(str(scan), fMRIConfig)
@@ -48,8 +67,14 @@ def _prepare_raw_data(target_dir, data_dir, limit=None, overwrite=False):
         array = np.asarray(fmri.numpy() if hasattr(fmri, "numpy") else fmri)
         if array.ndim != 2 or not np.isfinite(array).all():
             raise ValueError(f"Invalid [ROI, time] array from {scan}: {array.shape}")
+        expected_volumes = round(event.duration * event.frequency)
+        if array.shape[1] != expected_volumes:
+            raise ValueError(
+                f"Extraction lost volumes for {scan}: expected {expected_volumes}, got {array.shape[1]}"
+            )
 
         np.save(output, array.T.copy())
+        write_timeseries_metadata(output, scan, config, event.frequency)
         outputs.append(output)
 
     return outputs

@@ -36,7 +36,9 @@ fMRIConfig = {
         "preproc": "fmriprep",
         "resolution": "2.0mm",
         "registration": "msmall",
-        "freq": 0.05,
+        # None reads TR and time units from each scan's NIfTI header.
+        # Set an explicit frequency (Hz) only when the header is incorrect.
+        "freq": None,
     }
 
 contr_temp=0.1

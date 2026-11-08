@@ -14,6 +14,7 @@ from sklearn.model_selection import train_test_split
 from torch.utils.data import Dataset, Subset
 
 from preprocess.correlation import roi_correlation
+from preprocess.cache import validate_timeseries
 
 
 def _file_id(path):
@@ -85,6 +86,7 @@ class AbideDataset(Dataset):
 
     def __getitem__(self, index):
         record = self.records[index]
+        validate_timeseries(record["path"])
         time_by_roi = np.load(record["path"], allow_pickle=False)
         if time_by_roi.ndim != 2:
             raise ValueError(f"Expected [time, ROI] array in {record['path']}; got {time_by_roi.shape}")

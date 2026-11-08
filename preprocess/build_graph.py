@@ -6,8 +6,10 @@ import pickle
 import argparse
 from pathlib import Path
 from preprocess.correlation import roi_correlation
+from preprocess.cache import validate_timeseries
 
 def build_graph(file_path):
+    validate_timeseries(file_path)
     fmri = np.load(file_path, allow_pickle=False)
     corr, _ = roi_correlation(fmri)  # saved arrays are [time, ROI]
 
