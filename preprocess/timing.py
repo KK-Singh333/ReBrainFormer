@@ -38,6 +38,14 @@ ABIDE_PROTOCOLS = {
     "yale": ((2.0,), "Yale"),
 }
 
+# Leuven uses TR="shortest". Both site PDFs report minimum TR=1656 ms and
+# actual TR=1667 ms, so scan-specific headers can fall between those values.
+# These bounds identify the missing UNIT; they never replace the header TR.
+ABIDE_TR_RANGES = {
+    "leuven_1": (1.656, 1.667),
+    "leuven_2": (1.656, 1.667),
+}
+
 
 def resolve_scan_timing(filepath, header, config):
     raw_tr = float(header.get_zooms()[3])
@@ -65,11 +73,15 @@ def resolve_scan_timing(filepath, header, config):
             site = "maxmun"
         if site in ABIDE_PROTOCOLS:
             allowed, protocol = ABIDE_PROTOCOLS[site]
+            tr_range = ABIDE_TR_RANGES.get(site)
             matches = [name for name, scale in SECONDS_PER_UNIT.items()
-                       if any(np.isclose(raw_tr * scale, tr, rtol=1e-3, atol=1e-6) for tr in allowed)]
+                       if any(np.isclose(raw_tr * scale, tr, rtol=1e-3, atol=1e-6) for tr in allowed)
+                       or (tr_range is not None and tr_range[0] - 1e-6 <= raw_tr * scale <= tr_range[1] + 1e-6)]
             if len(matches) == 1:
                 unit, source = matches[0], "abide_i_protocol_match"
                 result["protocol_url"] = f"{PROTOCOL_ROOT}/{protocol}/rest.pdf"
+                if tr_range is not None:
+                    result["protocol_tr_range_seconds"] = list(tr_range)
     if unit not in SECONDS_PER_UNIT:
         raise ValueError(
             f"Cannot resolve NIfTI time unit {header_unit!r} for {Path(filepath).name}; "

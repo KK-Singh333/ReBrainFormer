@@ -46,6 +46,38 @@ class ScanTimingTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "raw header TR="):
                 resolve_scan_timing(filename, image_with_timing(tr).header, {})
 
+    def test_leuven_shortest_tr_preserves_reported_subject_value(self):
+        observed_tr = 1.6651899814605713
+        for site in ("Leuven_1", "Leuven_2"):
+            for scale, unit in [(1, "sec"), (1000, "msec"), (1_000_000, "usec")]:
+                with self.subTest(site=site, unit=unit):
+                    image = image_with_timing(observed_tr * scale)
+                    timing = resolve_scan_timing(f"{site}_0050695_func_preproc.nii.gz", image.header, {})
+                    expected = float(image.header.get_zooms()[3]) / scale
+                    self.assertEqual(timing["tr_seconds"], expected)
+                    self.assertEqual(timing["effective_time_unit"], unit)
+                    self.assertAlmostEqual(timing["tr_seconds"], observed_tr, places=6)
+                    self.assertEqual(timing["protocol_tr_range_seconds"], [1.656, 1.667])
+        for invalid in (1.5, 1.65, 1.67, 2, 3):
+            with self.assertRaises(ValueError):
+                resolve_scan_timing("Leuven_1_0050695_func_preproc.nii.gz", image_with_timing(invalid).header, {})
+
+    def test_leuven_resume_keeps_previous_verified_extraction(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            nib.save(image_with_timing(2), root / "Caltech_0051456_func_preproc.nii.gz")
+            nib.save(image_with_timing(1.6651899814605713), root / "Leuven_1_0050695_func_preproc.nii.gz")
+            with patch("preprocess.create_npy._fmri_extractor", side_effect=lambda event: event.read().get_fdata().reshape(8, -1)) as extractor:
+                first, = _prepare_raw_data(root / "arrays", root, limit=1)
+                digest = validate_timeseries(first)["array_sha256"]
+                paths = _prepare_raw_data(root / "arrays", root)
+                self.assertEqual(extractor.call_count, 2)
+                self.assertEqual(validate_timeseries(first)["array_sha256"], digest)
+            self.assertEqual(len(paths), 2)
+            self.assertEqual(np.load(paths[1]).shape, (196, 8))
+            timing = validate_timeseries(paths[1])["timing"]
+            self.assertAlmostEqual(timing["tr_seconds"], 1.6651899814605713)
+
     def test_header_unit_and_explicit_overrides_have_priority(self):
         name = "Caltech_0051456_func_preproc.nii.gz"
         timing = resolve_scan_timing(name, image_with_timing(3, "sec").header, {"unknown_time_unit": "msec"})
