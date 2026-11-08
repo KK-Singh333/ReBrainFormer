@@ -198,6 +198,10 @@ def main():
     parser.add_argument("--gamma", type=float, default=1.0)
     parser.add_argument("--resolution", type=float, default=1.0)
     parser.add_argument(
+        "--unknown-time-unit", choices=("sec", "msec", "usec"), default=None,
+        help="Explicit unit for headers with an unknown time unit; verify acquisition metadata first",
+    )
+    parser.add_argument(
         "--device", choices=("auto", "cpu", "cuda"), default="auto",
         help="Device for spectral calculations (default: CUDA when available)",
     )
@@ -233,6 +237,7 @@ def main():
         files = create_npy._prepare_raw_data(
             args.timeseries_dir, args.nifti_dir,
             limit=args.limit, overwrite=args.overwrite_timeseries,
+            unknown_time_unit=args.unknown_time_unit,
         )
 
     if not files:

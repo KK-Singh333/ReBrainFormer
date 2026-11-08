@@ -29,13 +29,15 @@ def metadata_path(path):
     return Path(str(path) + ".json")
 
 
-def write_timeseries_metadata(path, source, config, frequency):
+def write_timeseries_metadata(path, source, config, frequency, timing=None):
     array = np.load(path, allow_pickle=False)
     metadata = {
         "version": TIMESERIES_VERSION, "axes": "time,roi", "shape": list(array.shape),
         "array_sha256": file_digest(path), "source": source_signature(source),
         "config": config, "frequency_hz": float(frequency),
     }
+    if timing is not None:
+        metadata["timing"] = timing
     metadata_path(path).write_text(json.dumps(metadata, indent=2), encoding="utf-8")
     return metadata
 

@@ -1,17 +1,20 @@
 from pathlib import Path
 
 import numpy as np
+import nibabel as nib
 
 from configs.fmri_extractor import fMRIConfig
 from preprocess.load_graph import _fmri_extractor, _fmri_extractor_metadata
 from preprocess.cache import validate_timeseries, write_timeseries_metadata
 from configs.fmri_extractor import FMRI_EXTRACTOR_CONFIG
+from preprocess.timing import TIMING_VERSION, resolve_scan_timing
 
 
-def extraction_config():
+def extraction_config(scan_config=None):
     settings = {key: value for key, value in FMRI_EXTRACTOR_CONFIG.items() if key != "infra"}
     return {
-        "scan": dict(fMRIConfig),
+        "scan": dict(fMRIConfig if scan_config is None else scan_config),
+        "timing_resolver_version": TIMING_VERSION,
         "extractor": {
             key: value.model_dump(mode="json") if hasattr(value, "model_dump") else value
             for key, value in settings.items()
@@ -19,7 +22,7 @@ def extraction_config():
     }
 
 
-def _prepare_raw_data(target_dir, data_dir, limit=None, overwrite=False):
+def _prepare_raw_data(target_dir, data_dir, limit=None, overwrite=False, unknown_time_unit=None):
     data_dir = Path(data_dir)
     target_dir = Path(target_dir)
 
@@ -37,7 +40,10 @@ def _prepare_raw_data(target_dir, data_dir, limit=None, overwrite=False):
 
     target_dir.mkdir(parents=True, exist_ok=True)
     outputs = []
-    config = extraction_config()
+    scan_config = dict(fMRIConfig)
+    if unknown_time_unit is not None:
+        scan_config["unknown_time_unit"] = unknown_time_unit
+    config = extraction_config(scan_config)
 
     for index, scan in enumerate(scans, start=1):
         # Keep the existing .nii.npy naming expected by AbideDataset.
@@ -54,7 +60,7 @@ def _prepare_raw_data(target_dir, data_dir, limit=None, overwrite=False):
                 continue
 
         print(f"[{index}/{len(scans)}] Extracting {scan}")
-        event = _fmri_extractor_metadata(str(scan), fMRIConfig)
+        event = _fmri_extractor_metadata(str(scan), scan_config)
         if event is None:
             raise RuntimeError(f"Could not create fMRI event for {scan}")
 
@@ -74,7 +80,8 @@ def _prepare_raw_data(target_dir, data_dir, limit=None, overwrite=False):
             )
 
         np.save(output, array.T.copy())
-        write_timeseries_metadata(output, scan, config, event.frequency)
+        timing = resolve_scan_timing(scan, nib.load(scan).header, scan_config)
+        write_timeseries_metadata(output, scan, config, event.frequency, timing=timing)
         outputs.append(output)
 
     return outputs

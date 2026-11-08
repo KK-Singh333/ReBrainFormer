@@ -6,6 +6,7 @@ import nibabel as nib
 from neuralset import events, extractors
 
 from configs.fmri_extractor import FMRI_EXTRACTOR_CONFIG, fMRIConfig
+from preprocess.timing import resolve_scan_timing
 
 
 def _fmri_extractor_metadata(
@@ -26,23 +27,10 @@ def _fmri_extractor_metadata(
         image = nib.load(filepath)
         if len(image.shape) != 4 or image.shape[-1] < 2:
             raise ValueError(f"Expected a 4D fMRI scan with at least two volumes: {image.shape}")
-        frequency = fMRIConfig.get("freq")
-        if frequency is None:
-            tr = float(image.header.get_zooms()[3])
-            time_unit = image.header.get_xyzt_units()[1]
-            seconds_per_unit = {"sec": 1.0, "msec": 1e-3, "usec": 1e-6}
-            if time_unit not in seconds_per_unit:
-                raise ValueError(
-                    f"Unknown NIfTI time unit {time_unit!r}; verify TR and set "
-                    "fMRIConfig['freq'] explicitly in Hz"
-                )
-            tr *= seconds_per_unit[time_unit]
-            if not np.isfinite(tr) or tr <= 0:
-                raise ValueError(f"Invalid NIfTI TR: {tr}")
-            frequency = 1.0 / tr
-        frequency = float(frequency)
-        if not np.isfinite(frequency) or frequency <= 0:
-            raise ValueError(f"Invalid fMRI sampling frequency: {frequency}")
+        timing = resolve_scan_timing(filepath, image.header, fMRIConfig)
+        frequency = timing["frequency_hz"]
+        if timing["source"] != "nifti_header":
+            print(f"{os.path.basename(filepath)}: TR={timing['tr_seconds']:g}s ({timing['source']})")
 
         fmri_event = events.etypes.Fmri(
            
