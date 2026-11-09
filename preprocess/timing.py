@@ -43,6 +43,10 @@ ABIDE_PROTOCOLS = {
 # acquisition variation (including Leuven's TR="shortest"). It does NOT
 # validate a scan's exact protocol or replace its actual numeric TR.
 PROTOCOL_UNIT_RTOL = 0.01
+# Leuven uses a variable shortest TR. Observed headers include 1.650130s,
+# just outside 1% of the nominal 1.667s. Use 2% for unit identification at
+# these sites only; this is not a published acquisition range.
+LEUVEN_UNIT_RTOL = 0.02
 
 
 def resolve_scan_timing(filepath, header, config):
@@ -71,12 +75,13 @@ def resolve_scan_timing(filepath, header, config):
             site = "maxmun"
         if site in ABIDE_PROTOCOLS:
             allowed, protocol = ABIDE_PROTOCOLS[site]
+            tolerance = LEUVEN_UNIT_RTOL if site in ("leuven_1", "leuven_2") else PROTOCOL_UNIT_RTOL
             matches = [name for name, scale in SECONDS_PER_UNIT.items()
-                       if any(np.isclose(raw_tr * scale, tr, rtol=PROTOCOL_UNIT_RTOL, atol=1e-6) for tr in allowed)]
+                       if any(np.isclose(raw_tr * scale, tr, rtol=tolerance, atol=1e-6) for tr in allowed)]
             if len(matches) == 1:
                 unit, source = matches[0], "abide_i_protocol_match"
                 result["protocol_url"] = f"{PROTOCOL_ROOT}/{protocol}/rest.pdf"
-                result["protocol_unit_relative_tolerance"] = PROTOCOL_UNIT_RTOL
+                result["protocol_unit_relative_tolerance"] = tolerance
     if unit not in SECONDS_PER_UNIT:
         raise ValueError(
             f"Cannot resolve NIfTI time unit {header_unit!r} for {Path(filepath).name}; "

@@ -48,7 +48,7 @@ class ScanTimingTests(unittest.TestCase):
 
     def test_leuven_shortest_tr_preserves_reported_subject_value(self):
         for site in ("Leuven_1", "Leuven_2"):
-            for observed_tr in (1.6651899814605713, 1.66618, 1.66989004611969):
+            for observed_tr in (1.650130033493042, 1.6651899814605713, 1.66618, 1.66989004611969):
                 for scale, unit in [(1, "sec"), (1000, "msec"), (1_000_000, "usec")]:
                     with self.subTest(site=site, tr=observed_tr, unit=unit):
                         image = image_with_timing(observed_tr * scale)
@@ -57,8 +57,8 @@ class ScanTimingTests(unittest.TestCase):
                         self.assertAlmostEqual(timing["tr_seconds"], expected, places=14)
                         self.assertEqual(timing["effective_time_unit"], unit)
                         self.assertAlmostEqual(timing["tr_seconds"], observed_tr, places=6)
-                        self.assertEqual(timing["protocol_unit_relative_tolerance"], .01)
-        for invalid in (1.5, 1.65, 1.7, 2, 3):
+                        self.assertEqual(timing["protocol_unit_relative_tolerance"], .02)
+        for invalid in (1.5, 1.6, 1.72, 2, 3):
             with self.assertRaises(ValueError):
                 resolve_scan_timing("Leuven_1_0050695_func_preproc.nii.gz", image_with_timing(invalid).header, {})
 
