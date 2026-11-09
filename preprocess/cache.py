@@ -7,7 +7,9 @@ from pathlib import Path
 import numpy as np
 
 
-TIMESERIES_VERSION = 1
+# v2 is produced with fixed original-atlas columns, including zero-filled
+# missing parcels. Reject v1 even in --skip-extraction and training paths.
+TIMESERIES_VERSION = 2
 FEATURE_VERSION = 2
 
 

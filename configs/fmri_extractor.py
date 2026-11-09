@@ -1,12 +1,14 @@
 from exca.map import MapInfra
 from neuralset.extractors import neuro
+from preprocess.atlas import FixedAtlasProjector
 
 FMRI_EXTRACTOR_CONFIG = {
     "offset": 0.0,
     "fwhm": None,
 
-    "projection": neuro.AtlasProjector(
+    "projection": FixedAtlasProjector(
         atlas="aal",
+        atlas_kwargs={"version": "3v2"},
     ),
 
     # "cleaning": neuro.FmriCleaner(

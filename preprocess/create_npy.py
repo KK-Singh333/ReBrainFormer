@@ -22,6 +22,28 @@ def extraction_config(scan_config=None):
     }
 
 
+def audit_scan_timing(scans, scan_config):
+    """Check every header before doing expensive extraction or writing arrays."""
+    print(f"Checking timing for {len(scans)} scans before extraction...", flush=True)
+    timings, errors = {}, []
+    for index, scan in enumerate(scans, start=1):
+        try:
+            image = nib.load(scan)
+            if len(image.shape) != 4 or image.shape[-1] < 2:
+                raise ValueError(f"Expected 4D fMRI with at least two volumes; got {image.shape}")
+            timings[scan] = resolve_scan_timing(scan, image.header, scan_config)
+        except (OSError, ValueError) as error:
+            errors.append(f"{scan.name}: {error}")
+        if index % 100 == 0:
+            print(f"Checked {index}/{len(scans)} scan headers", flush=True)
+    if errors:
+        raise ValueError(
+            f"Timing preflight failed for {len(errors)}/{len(scans)} scans. "
+            "No new arrays were extracted. First errors:\n" + "\n".join(errors[:10])
+        )
+    return timings
+
+
 def _prepare_raw_data(target_dir, data_dir, limit=None, overwrite=False, unknown_time_unit=None):
     data_dir = Path(data_dir)
     target_dir = Path(target_dir)
@@ -44,6 +66,7 @@ def _prepare_raw_data(target_dir, data_dir, limit=None, overwrite=False, unknown
     if unknown_time_unit is not None:
         scan_config["unknown_time_unit"] = unknown_time_unit
     config = extraction_config(scan_config)
+    timings = audit_scan_timing(scans, scan_config)
 
     for index, scan in enumerate(scans, start=1):
         # Keep the existing .nii.npy naming expected by AbideDataset.
@@ -80,7 +103,7 @@ def _prepare_raw_data(target_dir, data_dir, limit=None, overwrite=False, unknown
             )
 
         np.save(output, array.T.copy())
-        timing = resolve_scan_timing(scan, nib.load(scan).header, scan_config)
+        timing = timings[scan]
         write_timeseries_metadata(output, scan, config, event.frequency, timing=timing)
         outputs.append(output)
 
